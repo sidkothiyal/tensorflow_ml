@@ -1,6 +1,7 @@
 from PIL import Image as pil
 import numpy as np
 
+
 class Image:
     def __init__(self, location, label=None):
         self.label = label
@@ -11,6 +12,12 @@ class Image:
             img = pil.open(self.location)
             pix = np.array(img)
             return pix
+
+    def convert_to_greyscale(self, img):
+        pass
+
+    def resize(self, img, size=(64,64)):
+        pass
 
 if __name__ == "__main__":
     image = Image(location="/home/siddharth/Desktop/datasets/mnist/trainingSet/0/img_1.jpg")

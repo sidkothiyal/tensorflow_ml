@@ -1,10 +1,12 @@
 import os
 import numpy as np
+from random import  shuffle
+import tensorflow as tf
 from Data.image import Image
 
 
 class Data:
-    def __init__(self, data_location=None, train=None, test=None, data_type="img", classification_type="folder", debug=False):
+    def __init__(self, data_location=None, data_type="img", classification_type="folder", debug=False):
         self.debug = debug
         if data_location is None:
             print("Must specify location to pick data from")
@@ -15,64 +17,109 @@ class Data:
         self.data_type = data_type
         self.labels = []
 
-        if train is not None and test is not None:
-            self.train_folder = train
-            self.test_folder = test
-            self.divided = True
+    def to_int64_tf_feature(self, val):
+        return tf.train.Feature(int64_list=tf.train.Int64List(value=[val]))
 
-    def get_data(self, label_type="one_hot"):
+    def to_int64list_tf_feature(self,val):
+        return tf.train.Feature(int64_list=tf.train.Int64List(value=val))
+
+    def to_byte_tf_feature(self, val):
+        return tf.train.Feature(bytes_list=tf.train.BytesList(value=[val]))
+
+    def to_float_tf_feature(self, val):
+        return tf.train.Feature(float_list=tf.train.FloatList(value=val))
+
+    def store_tf_record(self, output_file, dataset, feature_name_list):
+        file_writer = tf.python_io.TFRecordWriter(output_file)
+
+        if self.data_type == "img":
+            img_locs, labels = zip(*dataset)
+            for i, img_loc in enumerate(img_locs):
+
+                img = self.to_float_tf_feature(self.get_image_data(img_loc).flatten())
+                label = labels[i]
+
+                if type(label) == int:
+                    label = self.to_int64_tf_feature(label)
+                else:
+                    label = self.to_byte_tf_feature(label)
+
+                feature = {
+                    'img': img,
+                    'label': label
+                }
+
+                tf_feature = tf.train.Example(features=tf.train.Features(feature=feature))
+
+                file_writer.write(tf_feature.SerializeToString())
+
+        file_writer.close()
+
+    def get_data(self):
+        pass
+
+    def write_data(self, train=0., val=0., test=0., shuffle_class_data=True, label_type="name", feature_list=None):
+        train_dataset = []
+        test_dataset = []
+        validation_dataset = []
+
+        if train == 0. and test == 0.:
+            print("Both training and testing data cannot be empty")
+            exit()
+
+        if (train + test) > 1.:
+            print("Sum of training and test data cannot be more than 1")
+            exit()
+
+        if val == 0:
+            test = 1. - train
+
+        if (test + train) < 1. :
+            val = 1 - (test + train)
+
         if self.classification_type == "folder":
-            if self.divided:
-                train_folder_absolute_path = self.location + "/" + self.train_folder
-                train_data, train_label_data = self.classified_by_folder(train_folder_absolute_path, label_type=label_type)
-                if label_type == "one_hot":
-                    one_hot_labels = np.zeros((len(train_data), len(self.labels)))
-                    for i, label_loc in enumerate(train_label_data):
-                        one_hot_labels[i, label_loc] = 1
-                        if self.debug:
-                            if i < 5:
-                                print(one_hot_labels[i])
-                    train_label_data = one_hot_labels
+            for data in self.classified_by_folder(self.location, label_type=label_type):
+                if self.debug:
+                    print(data)
+
+                if shuffle_class_data:
+                    shuffle(data)
+                train_dataset.extend(data[: int(train * len(data))])
+                if val != 0:
+                    validation_dataset.extend(data[int(train * len(data)): int((train + val) * len(data))])
+                test_dataset.extend(data[int((train + val) * len(data)):])
 
                 if self.debug:
-                    print(train_data.shape, train_label_data.shape)
+                    print(test_dataset)
 
-                test_folder_absolute_path = self.location + "/" + self.test_folder
-                test_data, _ = self.classified_by_folder(test_folder_absolute_path, use_foldername_as_class_label=False)
-                if self.debug:
-                    print(test_data.shape)
+        if self.data_type == "img":
+            if feature_list is None:
+                feature_list = ["img", "label"]
+            self.store_tf_record("train.tfrecords", train_dataset, feature_name_list=feature_list)
+            if val != 0:
+                self.store_tf_record("validation.tfrecords", validation_dataset, feature_name_list=feature_list)
+            self.store_tf_record("test.tfrecords", test_dataset, feature_name_list=feature_list)
 
-                return self.labels, train_data, train_label_data, test_data
+    def classified_by_folder(self, folder, label_type="number"):
+        for class_label in os.listdir(folder):
+            data = []
+            label = []
+            if class_label not in self.labels:
+                self.labels.append(class_label)
 
-    def classified_by_folder(self, folder, use_foldername_as_class_label=True, label_type="one_hot"):
-        data = []
-        label_data = []
+            class_data_folder_absolute_path = folder + "/" + class_label
+            for data_file in os.listdir(class_data_folder_absolute_path):
+                file_loc = class_data_folder_absolute_path + "/" + data_file
+                data.append(file_loc)
+                if label_type == "number":
+                    label.append(len(self.labels) - 1)
+                else:
+                    try:
+                        label.append(int(class_label))
+                    except:
+                        label.append(class_label)
 
-        if use_foldername_as_class_label:
-            for class_label in os.listdir(folder):
-                if class_label not in self.labels:
-                    self.labels.append(class_label)
-
-                class_data_folder_absolute_path = folder + "/" + class_label
-                for data_file in os.listdir(class_data_folder_absolute_path):
-                    if self.data_type == "img":
-                        data.append(self.get_image_data(class_data_folder_absolute_path + "/" + data_file))
-
-                    if label_type == "one_hot" or label_type == "position":
-                        label_data.append(len(class_label) - 1)
-                    else:
-                        label_data.append(class_label)
-
-        else:
-            for data_file in os.listdir(folder):
-                if self.data_type == "img":
-                    data.append(self.get_image_data(folder + "/" + data_file))
-
-        data = np.array(data)
-        if len(label_data) != 0:
-            label_data = np.array(label_data)
-
-        return data, label_data
+            yield list(zip(data, label))
 
     def classified_with_csv(self, filename_first=True):
         pass
@@ -98,5 +145,5 @@ class Data:
 
 
 if __name__ == "__main__":
-    mnist = Data(data_location="/home/siddharth/Desktop/datasets/mnist/", train="trainingSet", test="testSet", classification_type="folder")
-    mnist.get_data()
+    mnist = Data(data_location="/home/siddharth/Desktop/datasets/mnist/trainingSet", classification_type="folder")
+    mnist.write_data(train=0.8)
