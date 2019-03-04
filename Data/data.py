@@ -33,11 +33,9 @@ class Data:
         file_writer = tf.python_io.TFRecordWriter(output_file)
 
         if self.data_type == "img":
-            img_locs, labels = zip(*dataset)
-            for i, img_loc in enumerate(img_locs):
-
+            for img_loc, label in dataset:
+                #print(img_loc, label)
                 img = self.to_float_tf_feature(self.get_image_data(img_loc).flatten())
-                label = labels[i]
 
                 if type(label) == int:
                     label = self.to_int64_tf_feature(label)
@@ -54,6 +52,41 @@ class Data:
                 file_writer.write(tf_feature.SerializeToString())
 
         file_writer.close()
+
+    def parser(self, record):
+        features = {
+            'img': tf.FixedLenFeature([], tf.float64),
+            'label': tf.FixedLenFeature([], tf.int64)
+        }
+
+        parsed_data = tf.parse_single_example(record, features)
+        img = tf.cast(parsed_data['img'], tf.float64)
+        img = tf.reshape(img, shape=[28, 28, 1])
+        label = tf.cast(parsed_data['label'], tf.int64)
+
+        return img, label
+
+    def input_fn(self, filename, train, batch_size=64, buffer_size=2048):
+        dataset = tf.data.TFRecordDataset(filenames=filename)
+
+        dataset = dataset.map(self.parser)
+
+        if train:
+            dataset = dataset.shuffle(buffer_size=buffer_size)
+            num_repeat = None
+        else:
+            num_repeat = 1
+
+        dataset = dataset.repeat(num_repeat)
+        dataset = dataset.batch(batch_size=batch_size)
+        iterator = dataset.make_one_shot_iterator()
+        data_batch, label_batch = iterator.get_next()
+
+        x = {'data': data_batch}
+        y = label_batch
+
+        return x, y
+
 
     def get_data(self):
         pass
